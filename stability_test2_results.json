@@ -1,0 +1,26 @@
+[
+  {
+    "run": 1,
+    "direction_score": 4,
+    "confidence": 0.4,
+    "trade_long": false,
+    "tier": "",
+    "risk_code": ""
+  },
+  {
+    "run": 2,
+    "direction_score": 4,
+    "confidence": 0.4,
+    "trade_long": false,
+    "tier": "",
+    "risk_code": ""
+  },
+  {
+    "run": 3,
+    "direction_score": 4,
+    "confidence": 0.4,
+    "trade_long": false,
+    "tier": "",
+    "risk_code": ""
+  }
+]

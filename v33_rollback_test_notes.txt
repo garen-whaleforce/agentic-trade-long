@@ -1,0 +1,18 @@
+v33 Iteration 1 Rollback - 100 樣本驗證測試
+
+日期: $(date)
+策略版本: v33_iteration1_rollback
+模型: gemini-3-flash-preview + gpt-4o-mini
+並發: 10 workers
+
+修復內容:
+1. ✅ 禁用 D8_MEGA tier
+2. ✅ 強化 D4_OPP gates (eps >= 3%, momentum check)
+3. ✅ 修復 D6 gates (disabled LOW_RISK, removed Tech exclusion)
+4. ✅ 放寬 D7 gates (day_ret >= 0.8, allow negative eps)
+
+預期結果:
+- 信號率: 15-20% (vs 38.5% before)
+- D4_OPP: <30% (vs 58.9% before)
+- D6 signals: 顯著增加 (vs 0.4% before)
+- D7 signals: 顯著增加 (vs 4.7% before)

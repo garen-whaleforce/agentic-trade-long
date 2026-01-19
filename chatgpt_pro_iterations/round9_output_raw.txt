@@ -1,0 +1,188 @@
+To address the issues raised in Round 9 Input and optimize the multi-agent system further, we can take a structured approach to improve cross-validation, fact delegation, agent output normalization, conflict resolution, and confidence quantification.
+
+1. Cross-Validation Strategy: Resolving Contradictions Between Agents
+Q1.1 Sanity Check:
+
+Yes, implementing a sanity check to detect contradictions between agent outputs is an effective strategy. This approach can significantly reduce misleading signals, ensuring more reliable decisions.
+
+python
+複製程式碼
+# Example: Sanity Check for Contradictory Signals
+def sanity_check(agent_results):
+    for agent_name, result in agent_results.items():
+        if agent_name == "comparative" and result["impact_score"] > 7:
+            if "historical_earnings" in agent_results and agent_results["historical_earnings"]["impact_score"] < -1:
+                logger.warning("Conflict detected between Comparative and Historical Earnings.")
+                return {"direction_score_penalty": -2}  # Adjust final score penalty
+    return {}
+
+# Use this in the orchestrator pipeline
+sanity_check_result = sanity_check(agent_results)
+if sanity_check_result:
+    direction_score += sanity_check_result["direction_score_penalty"]
+
+Q1.2 Sequential Agent Review:
+
+Having agents review each other's conclusions is a strong approach to challenge biased conclusions. This allows cross-validation at a deeper level.
+
+python
+複製程式碼
+# Example: Agent Review by Contextual Delegation
+comparative_result = ComparativeAgent.run(facts)
+historical_result = HistoricalEarningsAgent.run(facts, context=comparative_result)
+
+# Cross-reference results
+if comparative_result["relative_surprise"] == "positive" and historical_result["credibility_trend"] == "declining":
+    logger.warning("Comparative signal contradicts Historical Earnings credibility.")
+    # Further processing, like adjusting the score or flagging the contradiction.
+
+Q1.3 Conflict Resolution Strategy:
+
+Option A: Average with conflict penalty is a balanced approach that handles contradictions but still maintains some input from both agents.
+
+Option B: Trust more reliable agent could be used if you have historical data on agent reliability.
+
+Option C: Agreement threshold works well when you need stricter validation before finalizing the Direction Score.
+
+python
+複製程式碼
+# Example: Trust the more reliable agent based on impact scores
+def resolve_conflict(comparative_score, historical_score):
+    if comparative_score > historical_score:
+        return comparative_score  # Trust Comparative more if its score is higher
+    else:
+        return historical_score  # Otherwise, trust Historical Earnings
+
+2. Fact Delegation Improvements: Smarter Routing
+Q2.1 Intelligent Routing:
+
+To route facts more intelligently, consider mapping fact categories more explicitly to the relevant agent without redundancy. This ensures better processing efficiency.
+
+python
+複製程式碼
+# Example: Fact Routing with Specific Rules
+FACT_ROUTING = {
+    "Guidance": ["comparative", "historical_earnings"],
+    "Surprise": ["comparative", "historical_earnings"],
+    "Performance": ["historical_performance"],
+    "Market Reaction": ["comparative", "historical_performance"]
+}
+
+def route_facts(facts):
+    delegation = {agent: [] for agent in FACT_ROUTING.keys()}
+    for fact in facts:
+        category = fact["category"].lower()
+        for key, agents in FACT_ROUTING.items():
+            if key.lower() in category:
+                for agent in agents:
+                    delegation[agent].append(fact)
+    return delegation
+
+Q2.2 Prioritize Facts:
+
+Prioritizing facts by importance (e.g., guidance cut over minor inventory change) will focus processing on the most relevant factors, reducing noise.
+
+python
+複製程式碼
+# Example: Weight facts by priority
+HIGH_PRIORITY = ["GuidanceCut", "SevereMarginCompression"]
+LOW_PRIORITY = ["MinorInventoryChange"]
+
+def prioritize_facts(facts):
+    for fact in facts:
+        if fact["category"] in HIGH_PRIORITY:
+            fact["priority"] = 1  # High priority
+        elif fact["category"] in LOW_PRIORITY:
+            fact["priority"] = 0  # Low priority
+        else:
+            fact["priority"] = 0.5  # Neutral priority
+    return sorted(facts, key=lambda x: x["priority"], reverse=True)
+
+Q2.3 Fact Deduplication:
+
+Implementing fact deduplication will help eliminate redundancies (e.g., guidance revisions), reducing the workload on agents and preventing double-counting.
+
+python
+複製程式碼
+# Example: Deduplicate similar facts
+def deduplicate_facts(facts):
+    seen_facts = {}
+    unique_facts = []
+    for fact in facts:
+        fact_key = fact["content"]  # Use content or category for comparison
+        if fact_key not in seen_facts:
+            seen_facts[fact_key] = fact
+            unique_facts.append(fact)
+    return unique_facts
+
+3. Agent Output Normalization: Standardizing Impact Scores
+Q3.1 Standardize Impact Score Scale:
+
+Standardizing the impact score scale is crucial for consistent and fair comparison of agent outputs. This can be achieved by mapping all scores onto a common scale (e.g., 0-10 or -5 to +5).
+
+python
+複製程式碼
+# Example: Normalization to a common scale
+def normalize_score(score, scale_range=(0, 10)):
+    min_score, max_score = scale_range
+    normalized_score = (score - min_score) / (max_score - min_score) * 10
+    return normalized_score
+
+Q3.2 Combining Scores:
+
+Combining agent scores can be done using different strategies:
+
+Option A: Simple average
+
+Option B: Weighted average based on reliability or importance
+
+Option C: Consensus-based strategy, flagging conflicts if there is significant disagreement.
+
+python
+複製程式碼
+# Example: Weighted Average
+def weighted_average(scores, weights):
+    total_weight = sum(weights)
+    weighted_sum = sum(score * weight for score, weight in zip(scores, weights))
+    return weighted_sum / total_weight
+
+4. Conflict Resolution Logic: Handling Disagreements
+Code-level recommendations:
+
+Option A: Flag the conflict and apply a penalty to the Direction Score.
+
+Option B: Trust the agent with higher confidence if provided.
+
+python
+複製程式碼
+# Example: Conflict Resolution with Penalty
+def resolve_conflict(comparative, historical):
+    if comparative["impact_score"] > 7 and historical["impact_score"] < -1:
+        logger.warning("Conflict detected!")
+        return comparative["impact_score"] - 2  # Apply penalty
+    return (comparative["impact_score"] + historical["impact_score"]) / 2  # Average if no conflict
+
+5. Confidence Quantification: Expressing and Using Uncertainty
+Q5.1 & Q5.2 Returning Confidence Scores:
+
+Confidence scores can help quantify uncertainty. These can be integrated into the final decision by weighing agent outputs based on their confidence.
+
+python
+複製程式碼
+# Example: Using Confidence in Decision
+def weighted_confidence_combination(agent_outputs):
+    total_confidence = sum(agent["confidence"] for agent in agent_outputs)
+    weighted_score = sum(agent["impact_score"] * agent["confidence"] for agent in agent_outputs)
+    return weighted_score / total_confidence
+
+6. Expected Performance Impact:
+
+By implementing these changes:
+
+False positives will decrease by reducing contradictions between agents, improving signal reliability.
+
+The Direction Score will become more accurate, resulting in an increase in CAGR (2-4%) and Sharpe (0.1-0.2).
+
+Fact delegation efficiency will improve, reducing redundancy and ensuring that facts are routed more intelligently, which will reduce noise and improve agent output consistency.
+
+This optimization will contribute to the final goal of CAGR > 35% and Sharpe > 2.0, while also reducing the false positive rate and improving the signal reliability across agents.

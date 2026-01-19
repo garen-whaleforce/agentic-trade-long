@@ -1,0 +1,35 @@
+{
+  "test_case": {
+    "symbol": "NVDA",
+    "year": 2017,
+    "quarter": 1,
+    "transcript_date": null
+  },
+  "results": [
+    {
+      "run": 1,
+      "direction_score": 5,
+      "confidence": 0.5,
+      "trade_long": false,
+      "tier": "",
+      "risk_code": "",
+      "time_seconds": 193.94861698150635
+    },
+    {
+      "run": 2,
+      "direction_score": 5,
+      "confidence": 0.5,
+      "trade_long": false,
+      "tier": "",
+      "risk_code": "",
+      "time_seconds": 162.09842705726624
+    },
+    {
+      "run": 3,
+      "error": "Error code: 503 - {'error': {'message': \"litellm.ServiceUnavailableError: ServiceUnavailableError: Custom_openaiException - No available containers for tool 'codex'. Received Model Group=cli-gpt-5.2\\nAvailable Model Group Fallbacks=None\", 'type': None, 'param': None, 'code': '503'}}",
+      "time_seconds": 60.365987062454224
+    }
+  ],
+  "total_time": 416.41817688941956,
+  "model": "cli-gpt-5.2"
+}

@@ -1,0 +1,50 @@
+{
+  "total_signals": 3388,
+  "trade_long_count": 883,
+  "trade_long_pct": 26.062573789846518,
+  "tier_counts": {
+    "D4_ENTRY": 421,
+    "D7_CORE": 226,
+    "D6_STRICT": 178,
+    "D5_GATED": 58
+  },
+  "block_reasons": {
+    "HIGH_RISK": 1134,
+    "D4_TOO_MANY_SOFT": 395,
+    "D6_POSITIVES_LOW": 185,
+    "D6_EPS_LOW": 168,
+    "HARD_VETOES": 145,
+    "D7_EPS_LOW": 117,
+    "D4_NO_CONFIRM": 93,
+    "DIR_TOO_LOW": 83,
+    "D6_DAY_LOW": 60,
+    "D7_DAY_LOW": 58
+  },
+  "win_rate": 0.739524348810872,
+  "avg_return": 8.802265005662514,
+  "median_return": 12.7658,
+  "params": {
+    "d7_enabled": true,
+    "d7_min_eps": 0.0,
+    "d7_min_day_ret": 1.0,
+    "d7_max_soft_vetoes": 1,
+    "d6_enabled": true,
+    "d6_min_eps": 0.005,
+    "d6_min_positives": 1,
+    "d6_min_day_ret": 0.5,
+    "d6_require_low_risk": false,
+    "d6_exclude_sectors": [],
+    "d5_enabled": true,
+    "d5_min_eps": 0.0,
+    "d5_min_positives": 1,
+    "d5_max_soft_vetoes": 2,
+    "d4_enabled": true,
+    "d4_min_eps": 0.02,
+    "d4_min_positives": 2,
+    "d4_max_soft_vetoes": 1,
+    "d3_enabled": false,
+    "block_high_risk": true,
+    "block_hard_vetoes": true,
+    "risk_day_low": -5.0
+  }
+}

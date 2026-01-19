@@ -1,0 +1,39 @@
+{
+  "test_case": {
+    "symbol": "NVDA",
+    "year": 2017,
+    "quarter": 1,
+    "transcript_date": null
+  },
+  "results": [
+    {
+      "run": 1,
+      "direction_score": 4,
+      "confidence": 0.4,
+      "trade_long": false,
+      "tier": "",
+      "risk_code": "",
+      "time_seconds": 6.392064094543457
+    },
+    {
+      "run": 2,
+      "direction_score": 3,
+      "confidence": 0.3,
+      "trade_long": false,
+      "tier": "",
+      "risk_code": "",
+      "time_seconds": 4.459022283554077
+    },
+    {
+      "run": 3,
+      "direction_score": 4,
+      "confidence": 0.4,
+      "trade_long": false,
+      "tier": "",
+      "risk_code": "",
+      "time_seconds": 4.237658262252808
+    }
+  ],
+  "total_time": 15.088839769363403,
+  "model": "gemini-3-flash-preview"
+}

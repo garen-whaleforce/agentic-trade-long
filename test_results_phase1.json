@@ -1,0 +1,76 @@
+{
+  "test_date": "2026-01-19 13:19:56",
+  "phase": "Phase 1 (Rounds 6-7 Prompts)",
+  "total_samples": 5,
+  "successful": 5,
+  "failed": 0,
+  "results": [
+    {
+      "symbol": "AAPL",
+      "year": 2024,
+      "quarter": 1,
+      "direction_score": 4,
+      "confidence": 0.4,
+      "trade_long": true,
+      "tier": "D4_ENTRY",
+      "n_soft_vetoes": 0,
+      "n_hard_vetoes": 0,
+      "time_seconds": 11.811933040618896
+    },
+    {
+      "symbol": "MSFT",
+      "year": 2024,
+      "quarter": 1,
+      "direction_score": 6,
+      "confidence": 0.6,
+      "trade_long": false,
+      "tier": "",
+      "n_soft_vetoes": 0,
+      "n_hard_vetoes": 0,
+      "time_seconds": 17.2057888507843
+    },
+    {
+      "symbol": "GOOGL",
+      "year": 2024,
+      "quarter": 1,
+      "direction_score": 7,
+      "confidence": 0.7,
+      "trade_long": true,
+      "tier": "D7_CORE",
+      "n_soft_vetoes": 0,
+      "n_hard_vetoes": 0,
+      "time_seconds": 10.33929967880249
+    },
+    {
+      "symbol": "NVDA",
+      "year": 2024,
+      "quarter": 1,
+      "direction_score": 7,
+      "confidence": 0.7,
+      "trade_long": true,
+      "tier": "D7_CORE",
+      "n_soft_vetoes": 0,
+      "n_hard_vetoes": 0,
+      "time_seconds": 10.6338951587677
+    },
+    {
+      "symbol": "META",
+      "year": 2024,
+      "quarter": 1,
+      "direction_score": 3,
+      "confidence": 0.3,
+      "trade_long": false,
+      "tier": "",
+      "n_soft_vetoes": 0,
+      "n_hard_vetoes": 0,
+      "time_seconds": 18.054075956344604
+    }
+  ],
+  "summary": {
+    "avg_time_seconds": 13.608998537063599,
+    "d7_d6_ratio": 60.0,
+    "d4_ratio": 20.0,
+    "total_time": 68.04520869255066,
+    "proceed_to_phase2": true
+  }
+}

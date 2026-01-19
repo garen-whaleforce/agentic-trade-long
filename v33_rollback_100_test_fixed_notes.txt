@@ -1,0 +1,33 @@
+v33 Iteration 1 Rollback - 100 樣本驗證測試 (Fixed)
+
+日期: 2026-01-19
+策略版本: v33_iteration1_rollback
+模型: gemini-3-flash-preview + gpt-4o-mini
+並發: 10 workers
+
+## Round 1: Initial Validation (FAILED)
+
+結果: 0% 信號率 (0/100)
+問題: 所有 eps_surprise 數值為 null
+
+根本原因:
+- earnings_transcripts 表的年份/季度標籤與實際日期不符
+- 2017Q1 樣本的 transcript_date 在 2016 年 (相差 9-10 個月)
+- ±7 天的匹配窗口無法找到對應的 earnings_surprise 資料
+
+## Round 2: 修復後驗證 (IN PROGRESS)
+
+修復內容:
+1. ✅ 修改 pg_client.py::get_earnings_surprise()
+2. ✅ 針對 2019 年以前的資料使用 ±365 天匹配窗口
+3. ✅ 針對 2019 年以後的資料保持 ±7 天窗口
+
+測試結果: 88.9% (8/9) 樣本能成功找到 eps_surprise
+
+預期結果:
+- 信號率: 15-20% (vs 0% before)
+- D4_OPP: <30% (vs 0% before)
+- D6 signals: 顯著增加
+- D7 signals: 顯著增加
+
+執行中...
