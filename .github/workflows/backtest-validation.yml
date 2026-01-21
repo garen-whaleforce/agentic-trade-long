@@ -1,0 +1,277 @@
+name: Backtest Results Validation (Gate-2 + Gate-3)
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+    paths:
+      - '**.json'
+      - 'backtest_*.py'
+      - 'gate*.py'
+      - 'run_*.py'
+  pull_request:
+    paths:
+      - '**.json'
+      - 'backtest_*.py'
+      - 'gate*.py'
+      - 'run_*.py'
+
+jobs:
+  validate-backtest-results:
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        python-version: ['3.10']
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Cache pip dependencies
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          else
+            pip install pytest python-dotenv pandas numpy psycopg2-binary
+          fi
+
+      - name: Run Gate-2 Data Contract Validation
+        id: gate2
+        run: |
+          echo "=================================="
+          echo "Gate-2: Data Contract Validation"
+          echo "=================================="
+          echo ""
+
+          # Check for backtest results
+          backtest_files=$(find . -path "*/backtest_checkpoints_*/backtest_results_*.json" -type f)
+
+          if [ -z "$backtest_files" ]; then
+            echo "⚠️ No backtest results found. Skipping Gate-2."
+            echo "gate2_status=skipped" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # Run Gate-2 tests
+          if [ -f "tests/test_gate2_data_contract.py" ]; then
+            echo "Running Gate-2 pytest..."
+            if SKIP_DB_CONNECTION=true pytest tests/test_gate2_data_contract.py -v; then
+              echo "gate2_status=passed" >> $GITHUB_OUTPUT
+              echo "✅ Gate-2: PASS"
+            else
+              echo "gate2_status=failed" >> $GITHUB_OUTPUT
+              echo "❌ Gate-2: FAIL"
+              exit 1
+            fi
+          else
+            echo "⚠️ Gate-2 tests not found"
+            echo "gate2_status=skipped" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Run Gate-3 Execution Contract Validation
+        id: gate3
+        if: steps.gate2.outputs.gate2_status == 'passed' || steps.gate2.outputs.gate2_status == 'skipped'
+        run: |
+          echo "=================================="
+          echo "Gate-3: Execution Contract Validation"
+          echo "=================================="
+          echo ""
+
+          # Find tradeable files
+          tradeable_files=$(find . -maxdepth 1 -name "tradeable_*.json" -type f)
+
+          if [ -z "$tradeable_files" ]; then
+            echo "⚠️ No tradeable_*.json files found. Skipping Gate-3."
+            echo "gate3_status=skipped" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          passed=0
+          failed=0
+          failed_files=""
+
+          for file in $tradeable_files; do
+            portfolio=$(basename "$file" .json | sed 's/tradeable_//')
+            echo "Validating: $file ($portfolio)"
+
+            if python gate3_execution_contract.py "$file" "$portfolio" 2>&1; then
+              ((passed++))
+              echo "✅ PASS: $file"
+            else
+              ((failed++))
+              failed_files="$failed_files\n  - $file"
+              echo "❌ FAIL: $file"
+            fi
+            echo ""
+          done
+
+          echo "=================================="
+          echo "Gate-3 Summary:"
+          echo "  Passed: $passed"
+          echo "  Failed: $failed"
+          echo "=================================="
+
+          if [ $failed -gt 0 ]; then
+            echo "gate3_status=failed" >> $GITHUB_OUTPUT
+            echo "gate3_failed_files<<EOF" >> $GITHUB_OUTPUT
+            echo -e "$failed_files" >> $GITHUB_OUTPUT
+            echo "EOF" >> $GITHUB_OUTPUT
+            exit 1
+          else
+            echo "gate3_status=passed" >> $GITHUB_OUTPUT
+            echo "✅ All files passed Gate-3 validation"
+          fi
+
+      - name: UAL Sentinel Regression Test
+        if: steps.gate3.outputs.gate3_status == 'passed'
+        run: |
+          echo "=================================="
+          echo "UAL Sentinel Regression Test"
+          echo "=================================="
+          echo ""
+          echo "Checking UAL (2019-01-17) execution correctness..."
+
+          sentinel_found=false
+
+          for file in tradeable_*.json; do
+            if [ ! -f "$file" ]; then continue; fi
+
+            if grep -q '"symbol".*:.*"UAL"' "$file" && \
+               grep -q '"2019-01-17"' "$file"; then
+              sentinel_found=true
+              echo "✅ Found UAL sentinel in: $file"
+
+              # Validate exit date
+              python3 << 'EOF'
+          import json
+          import sys
+
+          with open("$file") as f:
+              data = json.load(f)
+
+          trades = data.get("trades", [])
+          for trade in trades:
+              if trade.get("symbol") == "UAL" and trade.get("entry_date") == "2019-01-17":
+                  exit_date = trade.get("actual_exit_date")
+                  print(f"   Entry: 2019-01-17")
+                  print(f"   Exit:  {exit_date}")
+
+                  # Valid range: 2019-02-15 to 2019-02-22
+                  if "2019-02-15" <= exit_date <= "2019-02-22":
+                      print("   ✅ T+30 execution CORRECT")
+                      sys.exit(0)
+                  elif exit_date == "2020-10-29":
+                      print("   ❌ PORTFOLIO REBALANCE DETECTED (452 days)!")
+                      print("   This indicates wrong execution model.")
+                      sys.exit(1)
+                  else:
+                      print(f"   ⚠️  Exit date outside expected range")
+                      sys.exit(1)
+          EOF
+            fi
+          done
+
+          if [ "$sentinel_found" = false ]; then
+            echo "⚠️ UAL sentinel trade not found in any file"
+            echo "This is OK if UAL is not in the tested portfolio"
+          fi
+
+      - name: Generate validation report
+        if: always()
+        run: |
+          echo "# Backtest Validation Report" > validation_report.md
+          echo "" >> validation_report.md
+          echo "**Date**: $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> validation_report.md
+          echo "**Commit**: ${{ github.sha }}" >> validation_report.md
+          echo "**Branch**: ${{ github.ref_name }}" >> validation_report.md
+          echo "" >> validation_report.md
+
+          echo "## Gate-2: Data Contract" >> validation_report.md
+          gate2_status="${{ steps.gate2.outputs.gate2_status }}"
+          if [ "$gate2_status" = "passed" ]; then
+            echo "✅ **PASSED** - All data contract requirements met" >> validation_report.md
+          elif [ "$gate2_status" = "failed" ]; then
+            echo "❌ **FAILED** - Data contract violations detected" >> validation_report.md
+          else
+            echo "⚠️ **SKIPPED** - No backtest results found" >> validation_report.md
+          fi
+          echo "" >> validation_report.md
+
+          echo "## Gate-3: Execution Contract" >> validation_report.md
+          gate3_status="${{ steps.gate3.outputs.gate3_status }}"
+          if [ "$gate3_status" = "passed" ]; then
+            echo "✅ **PASSED** - All execution contract requirements met" >> validation_report.md
+          elif [ "$gate3_status" = "failed" ]; then
+            echo "❌ **FAILED** - Execution contract violations detected" >> validation_report.md
+            echo "" >> validation_report.md
+            echo "Failed files:" >> validation_report.md
+            echo "${{ steps.gate3.outputs.gate3_failed_files }}" >> validation_report.md
+          else
+            echo "⚠️ **SKIPPED** - No tradeable files found" >> validation_report.md
+          fi
+          echo "" >> validation_report.md
+
+          echo "## Verdict" >> validation_report.md
+          if [ "$gate2_status" = "passed" ] && [ "$gate3_status" = "passed" ]; then
+            echo "✅ **AUDITABLE** - Results can be used for strategy decisions" >> validation_report.md
+          else
+            echo "❌ **NON-ACTIONABLE** - Results cannot be used for strategy decisions" >> validation_report.md
+            echo "" >> validation_report.md
+            echo "Please fix violations before merging. See CLAUDE.md Rule #0 for requirements." >> validation_report.md
+          fi
+
+          cat validation_report.md
+
+      - name: Upload validation report
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: validation-report
+          path: validation_report.md
+
+      - name: Comment PR with validation results
+        if: github.event_name == 'pull_request' && always()
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const fs = require('fs');
+            const report = fs.readFileSync('validation_report.md', 'utf8');
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: report
+            });
+
+      - name: Fail if validation failed
+        if: steps.gate2.outputs.gate2_status == 'failed' || steps.gate3.outputs.gate3_status == 'failed'
+        run: |
+          echo "=================================="
+          echo "❌ VALIDATION FAILED"
+          echo "=================================="
+          echo ""
+          echo "Results are marked NON-ACTIONABLE and cannot be used for strategy decisions."
+          echo ""
+          echo "Please review:"
+          echo "  - Gate-2 output above for data contract violations"
+          echo "  - Gate-3 output above for execution contract violations"
+          echo "  - CLAUDE.md Rule #0 for requirements"
+          echo ""
+          exit 1

@@ -1,0 +1,125 @@
+name: Pre-commit Hooks
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+  pull_request:
+
+jobs:
+  pre-commit:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install black flake8 mypy isort
+
+      - name: Run Black (code formatting)
+        continue-on-error: true
+        run: |
+          echo "Checking Python code formatting with Black..."
+          black --check --diff . || echo "⚠️ Code formatting issues found. Run: black ."
+
+      - name: Run Flake8 (linting)
+        continue-on-error: true
+        run: |
+          echo "Running Flake8 linting..."
+          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics || echo "⚠️ Linting issues found"
+
+      - name: Run isort (import sorting)
+        continue-on-error: true
+        run: |
+          echo "Checking import sorting with isort..."
+          isort --check-only --diff . || echo "⚠️ Import sorting issues found. Run: isort ."
+
+      - name: Check for debug statements
+        run: |
+          echo "Checking for debug statements..."
+          if grep -r "import pdb" --include="*.py" . ; then
+            echo "❌ Found 'import pdb' statements. Please remove before committing."
+            exit 1
+          fi
+          if grep -r "breakpoint()" --include="*.py" . ; then
+            echo "❌ Found 'breakpoint()' statements. Please remove before committing."
+            exit 1
+          fi
+          echo "✅ No debug statements found"
+
+      - name: Check for hardcoded credentials
+        run: |
+          echo "Checking for hardcoded credentials..."
+
+          # Check for common credential patterns
+          if grep -rE "(password|api_key|secret|token).*=.*['\"][^'\"]{8,}" --include="*.py" . | grep -v "test" | grep -v ".git" ; then
+            echo "⚠️ Possible hardcoded credentials found. Please review."
+            echo "Use environment variables or credentials.json instead."
+          fi
+
+          # Check if credentials.json is accidentally committed
+          if git ls-files | grep -q "credentials.json"; then
+            echo "❌ credentials.json should not be committed!"
+            exit 1
+          fi
+
+          echo "✅ No obvious credential issues found"
+
+      - name: Check for large files
+        run: |
+          echo "Checking for large files..."
+          large_files=$(find . -type f -size +10M -not -path "./.git/*" -not -path "./.github/*")
+
+          if [ ! -z "$large_files" ]; then
+            echo "⚠️ Large files detected (>10MB):"
+            echo "$large_files"
+            echo "Consider using Git LFS or excluding from repository."
+          else
+            echo "✅ No large files found"
+          fi
+
+      - name: Verify Gate-3 Contract integrity
+        run: |
+          echo "Verifying Gate-3 contract implementation..."
+
+          # Check if gate3_execution_contract.py has required checks
+          if ! grep -q "MIN_HOLDING_DAYS.*=.*28" gate3_execution_contract.py; then
+            echo "❌ Gate-3 MIN_HOLDING_DAYS constant missing or incorrect"
+            exit 1
+          fi
+
+          if ! grep -q "MAX_HOLDING_DAYS.*=.*45" gate3_execution_contract.py; then
+            echo "❌ Gate-3 MAX_HOLDING_DAYS constant missing or incorrect"
+            exit 1
+          fi
+
+          if ! grep -q "HARD_MAX_HOLDING_DAYS.*=.*60" gate3_execution_contract.py; then
+            echo "❌ Gate-3 HARD_MAX_HOLDING_DAYS constant missing or incorrect"
+            exit 1
+          fi
+
+          echo "✅ Gate-3 contract integrity verified"
+
+      - name: Check CLAUDE.md is up to date
+        run: |
+          echo "Checking CLAUDE.md..."
+
+          if ! grep -q "Gate-3: Execution Contract" CLAUDE.md 2>/dev/null; then
+            echo "⚠️ CLAUDE.md missing Gate-3 documentation"
+            echo "Please update CLAUDE.md with Gate-3 requirements"
+          fi
+
+          if ! grep -q "UAL Sentinel" CLAUDE.md 2>/dev/null; then
+            echo "⚠️ CLAUDE.md missing UAL Sentinel documentation"
+          fi
+
+          echo "✅ CLAUDE.md check complete"

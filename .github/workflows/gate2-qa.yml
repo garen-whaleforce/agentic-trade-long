@@ -1,0 +1,78 @@
+name: Gate-2 Data Contract QA
+
+on:
+  push:
+    paths:
+      - 'pg_client.py'
+      - 'agentic_rag_bridge.py'
+      - 'run_full_backtest_gpt5mini.py'
+      - 'tests/test_gate2_data_contract.py'
+  pull_request:
+    paths:
+      - 'pg_client.py'
+      - 'agentic_rag_bridge.py'
+      - 'run_full_backtest_gpt5mini.py'
+      - 'tests/test_gate2_data_contract.py'
+
+jobs:
+  gate2-contract-tests:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest psycopg2-binary python-dotenv pandas
+
+      - name: Check for backtest results
+        id: check_results
+        run: |
+          if [ -f "EarningsCallAgenticRag/backtest_checkpoints_gpt5mini/backtest_results_gpt5mini.json" ]; then
+            echo "results_exist=true" >> $GITHUB_OUTPUT
+          else
+            echo "results_exist=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Run Gate-2 Data Contract Tests (pytest)
+        if: steps.check_results.outputs.results_exist == 'true'
+        run: |
+          pytest tests/test_gate2_data_contract.py -v
+        env:
+          # Database connection will be skipped in CI if not configured
+          # The test will use existing backtest results file
+          SKIP_DB_CONNECTION: true
+
+      - name: Run Gate-2 Data Contract Tests (standalone)
+        if: steps.check_results.outputs.results_exist == 'true'
+        run: |
+          python tests/test_gate2_data_contract.py
+
+      - name: Skip tests (no backtest results)
+        if: steps.check_results.outputs.results_exist == 'false'
+        run: |
+          echo "⚠️ No backtest results found. Skipping Gate-2 contract tests."
+          echo "These tests will run automatically when backtest results are available."
+
+      - name: Generate QA Report
+        if: failure()
+        run: |
+          echo "❌ Gate-2 Data Contract Tests FAILED"
+          echo ""
+          echo "This means your changes to pg_client.py or agentic_rag_bridge.py"
+          echo "have violated one or more data contract requirements:"
+          echo ""
+          echo "  Check A: Lookahead Safety (>=90% safe, <5% violations)"
+          echo "  Check B: EPS Surprise Coverage (>95% valid)"
+          echo "  Check C: Cross-Quarter Drift (>=90% ≤3d, 100% ≤7d)"
+          echo "  Check D: NULL Field Threshold (transcript 0%, earnings <5%)"
+          echo ""
+          echo "Please review the test output above and fix the issues."
+          echo "See P0_PRIME_GATE2_QA_REPORT.md for detailed requirements."

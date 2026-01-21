@@ -1,0 +1,176 @@
+name: Gate-3 Execution Contract Validation
+
+on:
+  push:
+    paths:
+      - 'backtest_stop_loss_tradeable.py'
+      - 'generate_*_tradeable.py'
+      - 'gate3_execution_contract.py'
+      - 'tradeable_*.json'
+      - 'EarningsCallAgenticRag/backtest_checkpoints_*/backtest_results_*.json'
+  pull_request:
+    paths:
+      - 'backtest_stop_loss_tradeable.py'
+      - 'generate_*_tradeable.py'
+      - 'gate3_execution_contract.py'
+      - 'tradeable_*.json'
+      - 'EarningsCallAgenticRag/backtest_checkpoints_*/backtest_results_*.json'
+
+jobs:
+  gate3-execution-validation:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest python-dotenv pandas numpy
+
+      - name: Find tradeable result files
+        id: find_files
+        run: |
+          tradeable_files=$(find . -maxdepth 1 -name "tradeable_*.json" -type f | head -10)
+          if [ -z "$tradeable_files" ]; then
+            echo "has_files=false" >> $GITHUB_OUTPUT
+            echo "⚠️ No tradeable_*.json files found"
+          else
+            echo "has_files=true" >> $GITHUB_OUTPUT
+            echo "Found tradeable files:"
+            echo "$tradeable_files"
+            # Save file list for next step
+            echo "$tradeable_files" > /tmp/tradeable_files.txt
+          fi
+
+      - name: Run Gate-3 Validation on all tradeable files
+        if: steps.find_files.outputs.has_files == 'true'
+        run: |
+          echo "=================================="
+          echo "Gate-3 Execution Contract Validator"
+          echo "=================================="
+          echo ""
+
+          failed_files=()
+          passed_files=()
+
+          while IFS= read -r file; do
+            if [ -f "$file" ]; then
+              echo "Validating: $file"
+              portfolio_name=$(basename "$file" .json | sed 's/tradeable_//')
+
+              if python gate3_execution_contract.py "$file" "$portfolio_name"; then
+                echo "✅ PASS: $file"
+                passed_files+=("$file")
+              else
+                echo "❌ FAIL: $file"
+                failed_files+=("$file")
+              fi
+              echo ""
+            fi
+          done < /tmp/tradeable_files.txt
+
+          # Summary
+          echo "=================================="
+          echo "Gate-3 Validation Summary"
+          echo "=================================="
+          echo "Passed: ${#passed_files[@]}"
+          echo "Failed: ${#failed_files[@]}"
+          echo ""
+
+          if [ ${#failed_files[@]} -gt 0 ]; then
+            echo "❌ Failed files:"
+            printf '%s\n' "${failed_files[@]}"
+            exit 1
+          else
+            echo "✅ All files passed Gate-3 validation"
+          fi
+
+      - name: UAL Sentinel Test
+        if: steps.find_files.outputs.has_files == 'true'
+        run: |
+          echo "=================================="
+          echo "UAL Sentinel Test (Canary)"
+          echo "=================================="
+          echo ""
+          echo "Checking for UAL (2019-01-17) in results..."
+          echo ""
+
+          # Check if any tradeable file contains UAL trade
+          for file in tradeable_*.json; do
+            if [ -f "$file" ]; then
+              if grep -q '"symbol".*:.*"UAL"' "$file" && \
+                 grep -q '"entry_date".*:.*"2019-01-17"' "$file"; then
+                echo "✅ Found UAL sentinel trade in: $file"
+
+                # Extract exit date
+                exit_date=$(python3 -c "
+          import json
+          with open('$file') as f:
+              data = json.load(f)
+          trades = data.get('trades', [])
+          for t in trades:
+              if t.get('symbol') == 'UAL' and t.get('entry_date') == '2019-01-17':
+                  print(t.get('actual_exit_date', 'UNKNOWN'))
+                  break
+                ")
+
+                echo "   Entry: 2019-01-17"
+                echo "   Exit:  $exit_date"
+
+                # Validate exit date is in valid range (2019-02-15 to 2019-02-22)
+                if [[ "$exit_date" > "2019-02-14" && "$exit_date" < "2019-02-23" ]]; then
+                  echo "   ✅ PASS: Exit date in valid T+30 range"
+                elif [[ "$exit_date" == "2020-10-29" ]]; then
+                  echo "   ❌ FAIL: Portfolio rebalance detected (452 days)!"
+                  exit 1
+                else
+                  echo "   ⚠️  WARN: Exit date outside expected range"
+                fi
+              fi
+            fi
+          done
+
+      - name: Skip validation (no files)
+        if: steps.find_files.outputs.has_files == 'false'
+        run: |
+          echo "⚠️ No tradeable_*.json files found. Skipping Gate-3 validation."
+          echo "Gate-3 validation will run when tradeable execution results are available."
+
+      - name: Generate failure report
+        if: failure()
+        run: |
+          echo "=================================="
+          echo "❌ Gate-3 Execution Contract FAILED"
+          echo "=================================="
+          echo ""
+          echo "One or more tradeable execution results violated Gate-3 requirements:"
+          echo ""
+          echo "  Check 1: Trade Ledger Complete"
+          echo "           - All required fields present (symbol, dates, prices, etc.)"
+          echo ""
+          echo "  Check 2: Holding Period T+30"
+          echo "           - 95% of trades: 28-45 days (or valid stop-loss <28 days)"
+          echo "           - Hard fail: >60 days (indicates portfolio rebalance, not T+30)"
+          echo ""
+          echo "  Check 3: Price Semantics Documented"
+          echo "           - Entry/exit price types clearly specified"
+          echo ""
+          echo "  Check 4: Signal Mapping 1:1"
+          echo "           - One signal → one trade (no duplicate executions)"
+          echo ""
+          echo "  UAL Sentinel Test:"
+          echo "           - Entry: 2019-01-17"
+          echo "           - Exit:  2019-02-15 ~ 2019-02-22 (T+30 valid range)"
+          echo "           - ❌ FORBIDDEN: 2020-10-29 (portfolio rebalance, 452 days)"
+          echo ""
+          echo "Results failing Gate-3 are marked NON-ACTIONABLE."
+          echo "Please review CLAUDE.md Rule #0 for details."
+          echo ""
+          echo "See gate3_execution_contract.py output above for specific violations."
