@@ -174,10 +174,15 @@ def get_stock_volatility(symbol: str, as_of_date: str) -> float:
 def validate_market_anchors(market_anchors: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     """驗證和清理 market anchors 數據。
 
+    CRITICAL FIX (2026-01-21): 修正單位不一致問題
+    - pg_client 返回的是百分點 (5.5 = +5.5%)
+    - 截斷值必須使用百分點制，不是小數制
+
     Added: 2026-01-19 (ChatGPT Pro Round 10 - Phase 6)
+    Fixed: 2026-01-21 (P0-1 Critical Fix)
 
     Args:
-        market_anchors: Market anchors dictionary
+        market_anchors: Market anchors dictionary (returns are in percentage points)
 
     Returns:
         Validated and cleaned market anchors
@@ -197,25 +202,27 @@ def validate_market_anchors(market_anchors: Optional[Dict[str, Any]]) -> Dict[st
             print(f"Warning: Capping extreme negative eps_surprise {eps_surprise:.1%} → -50%")
             validated["eps_surprise"] = -0.50
 
-    # Validate earnings_day_return (should be between -50% and +100%)
+    # Validate earnings_day_return (百分點制: -50.0 ~ +100.0)
+    # CRITICAL: pg_client 返回百分點 (6.0 = +6%, not 0.06)
     earnings_day_return = validated.get("earnings_day_return")
     if earnings_day_return is not None:
-        if earnings_day_return > 1.0:  # +100%
-            print(f"Warning: Capping extreme earnings_day_return {earnings_day_return:.1%} → 100%")
-            validated["earnings_day_return"] = 1.0
-        elif earnings_day_return < -0.50:  # -50%
-            print(f"Warning: Capping extreme earnings_day_return {earnings_day_return:.1%} → -50%")
-            validated["earnings_day_return"] = -0.50
+        if earnings_day_return > 100.0:  # +100%
+            print(f"Warning: Capping extreme earnings_day_return {earnings_day_return:.2f}% → +100%")
+            validated["earnings_day_return"] = 100.0
+        elif earnings_day_return < -50.0:  # -50%
+            print(f"Warning: Capping extreme earnings_day_return {earnings_day_return:.2f}% → -50%")
+            validated["earnings_day_return"] = -50.0
 
-    # Validate pre_earnings_5d_return
+    # Validate pre_earnings_5d_return (百分點制: -30.0 ~ +50.0)
+    # CRITICAL: pg_client 返回百分點 (12.0 = +12%, not 0.12)
     pre_earnings_5d_return = validated.get("pre_earnings_5d_return")
     if pre_earnings_5d_return is not None:
-        if pre_earnings_5d_return > 0.50:  # +50%
-            print(f"Warning: Capping extreme pre_earnings_5d_return {pre_earnings_5d_return:.1%} → 50%")
-            validated["pre_earnings_5d_return"] = 0.50
-        elif pre_earnings_5d_return < -0.30:  # -30%
-            print(f"Warning: Capping extreme pre_earnings_5d_return {pre_earnings_5d_return:.1%} → -30%")
-            validated["pre_earnings_5d_return"] = -0.30
+        if pre_earnings_5d_return > 50.0:  # +50%
+            print(f"Warning: Capping extreme pre_earnings_5d_return {pre_earnings_5d_return:.2f}% → +50%")
+            validated["pre_earnings_5d_return"] = 50.0
+        elif pre_earnings_5d_return < -30.0:  # -30%
+            print(f"Warning: Capping extreme pre_earnings_5d_return {pre_earnings_5d_return:.2f}% → -30%")
+            validated["pre_earnings_5d_return"] = -30.0
 
     return validated
 
@@ -369,17 +376,35 @@ def run_single_call_from_context(
     try:
         import pg_client
 
-        # Get EPS surprise
-        eps_data = pg_client.get_earnings_surprise(symbol, year, quarter)
+        # P0' GATE-2: Get earnings day return FIRST to establish canonical event_date
+        # This uses price_analysis table (transcript_id join), which is immune to fiscal year issues
+        day_ret = pg_client.get_earnings_day_return(symbol, year, quarter)
+        canonical_event_date = None  # Will be used as anchor for EPS surprise
+
+        if day_ret and day_ret.get("pct_change_t") is not None:
+            market_anchors["earnings_day_return"] = day_ret.get("pct_change_t")
+
+            # Extract canonical earnings_date from day_ret
+            canonical_event_date = day_ret.get("earnings_date")
+
+            # Diagnostic info for P0 verification
+            market_anchors["_earnings_day_return_source"] = day_ret.get("source")
+            market_anchors["_earnings_date"] = canonical_event_date
+            market_anchors["_earnings_day_start"] = day_ret.get("price_start_date")
+            market_anchors["_earnings_day_end"] = day_ret.get("price_end_date")
+
+        # P0' GATE-2: Get EPS surprise using canonical event_date as anchor
+        # This ensures eps_surprise uses the SAME earnings_date as earnings_day_return
+        eps_data = pg_client.get_earnings_surprise(symbol, year, quarter, event_date=canonical_event_date)
         if eps_data:
             market_anchors["eps_surprise"] = eps_data.get("eps_surprise")
             market_anchors["eps_actual"] = eps_data.get("eps_actual")
             market_anchors["eps_estimated"] = eps_data.get("eps_estimated")
 
-        # Get price analysis (earnings day return)
-        price_analysis = pg_client.get_price_analysis(symbol, year, quarter)
-        if price_analysis:
-            market_anchors["earnings_day_return"] = price_analysis.get("pct_change_t")
+            # P0' GATE-2: Add diagnostic fields
+            market_anchors["_eps_surprise_date"] = eps_data.get("earnings_date")
+            market_anchors["_eps_surprise_diff_days"] = eps_data.get("diff_days")
+            market_anchors["_eps_surprise_source"] = eps_data.get("eps_surprise_source")
 
         # Get pre-earnings momentum (5-day)
         # FIX: Normalize transcript_date to YYYY-MM-DD (FMP may return "YYYY-MM-DD HH:MM:SS")
@@ -544,11 +569,17 @@ def run_single_call_from_context(
     # -------------------------------------------------------------------------
     LONG_D6_ENABLED = os.getenv("LONG_D6_ENABLED", "1") == "1"
     LONG_D6_MIN_EPS_SURPRISE = float(os.getenv("LONG_D6_MIN_EPS_SURPRISE", "0.02"))  # eps >= 2%
-    LONG_D6_MIN_POSITIVES = int(os.getenv("LONG_D6_MIN_POSITIVES", "2"))  # positives >= 2
+    LONG_D6_MIN_POSITIVES = int(os.getenv("LONG_D6_MIN_POSITIVES", "0"))  # positives >= 0 (P1-A fix, aligned with D7)
     LONG_D6_MIN_DAY_RET = float(os.getenv("LONG_D6_MIN_DAY_RET", "0.5"))  # earnings_day >= 0.5%
     LONG_D6_REQUIRE_LOW_RISK = os.getenv("LONG_D6_REQUIRE_LOW_RISK", "0") == "1"  # DISABLED (v33 Iter 1)
     LONG_D6_ALLOW_MEDIUM_WITH_DAY = os.getenv("LONG_D6_ALLOW_MEDIUM_WITH_DAY", "0") == "1"  # allow medium if day>=0
     LONG_D6_EXCLUDE_SECTORS = os.getenv("LONG_D6_EXCLUDE_SECTORS", "").split(",") if os.getenv("LONG_D6_EXCLUDE_SECTORS") else []  # NO EXCLUSIONS (v33 Iter 1)
+
+    # -------------------------------------------------------------------------
+    # TIER 5: D3 WIDE (Direction >= 3, relaxed tier)
+    # P1-C (2026-01-20): DISABLED to reduce signal rate
+    # -------------------------------------------------------------------------
+    LONG_D3_ENABLED = os.getenv("LONG_D3_ENABLED", "0") == "1"  # P1-C: disabled (signal quality insufficient)
 
     # -------------------------------------------------------------------------
     # Sector-specific rules (apply to both tiers)
@@ -1134,17 +1165,18 @@ def run_single_call_from_context(
 
                 # =================================================================
                 # TIER 4b: D4_OPP (Direction >= 4, Opportunity tier)
+                # P1-D (2026-01-20): TIGHTENED EPS threshold to reduce signal rate
                 # v33 Iteration 1 (2026-01-19 rollback - STRENGTHENED)
                 # Requirements:
                 # - soft <= 2 (more permissive)
-                # - EPS >= 3% (RAISED from 1%)
+                # - EPS >= 5% (P1-D: RAISED from 3%)
                 # - Momentum aligned (NEW: day_return must align with direction)
                 # - Not high risk
                 # =================================================================
                 d4_opp_soft_ok = soft_veto_count <= 2
 
-                # STRENGTHENED: EPS surprise must be >= 3%
-                d4_opp_eps_ok = eps_surprise is not None and eps_surprise >= 0.03
+                # P1-D: TIGHTENED EPS surprise must be >= 5% (was 3%)
+                d4_opp_eps_ok = eps_surprise is not None and eps_surprise >= 0.05
 
                 # NEW: Momentum alignment check
                 d4_opp_momentum_ok = True
@@ -1172,10 +1204,11 @@ def run_single_call_from_context(
 
             # =================================================================
             # TIER 5: D3 WIDE (Direction >= 3, relaxed confirmations)
+            # P1-C (2026-01-20): DISABLED - signal quality insufficient
             # ChatGPT Pro Round 5: Relaxed gates from 3/3% to 2/2%
             # - Requires: soft=0, (positives>=2 OR EPS>=2%), no HIGH_RISK
             # =================================================================
-            if direction_score >= 3:
+            if direction_score >= 3 and LONG_D3_ENABLED:  # P1-C: check if D3 enabled
                 # D3: NO soft vetoes allowed (strictest confirmation)
                 if soft_veto_count > 0:
                     return False, computed_risk, "D3_HAS_SOFT_VETOES", "", soft_veto_count
